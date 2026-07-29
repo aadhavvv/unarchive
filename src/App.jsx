@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from './lib/supabase'
+import Auth from './Auth'
 import './App.css'
 
 const CATS = ["All","Tops","Bottoms","Dresses","Shoes","Accessories"]
@@ -8,6 +9,7 @@ const SUGGEST = (item) => Math.round((item.bought_price||0) * (item.condition===
 const BUCKET = "clothing-clicks"
 
 export default function App() {
+  const [session, setSession] = useState(null)
   const [tab, setTab] = useState("wardrobe")
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -25,7 +27,14 @@ export default function App() {
   const timer = useRef(null)
   const fileInputRef = useRef(null)
 
-  useEffect(() => { fetchItems() }, [])
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
+    supabase.auth.onAuthStateChange((_event, session) => setSession(session))
+  }, [])
+
+  useEffect(() => { if (session) fetchItems() }, [session])
+
+  if (!session) return <Auth />
 
   async function fetchItems() {
     setLoading(true)
@@ -64,6 +73,7 @@ export default function App() {
       name: form.name, brand: form.brand, category: form.category,
       condition: form.condition, bought_price: parseFloat(form.bought_price)||0,
       wears: 0, status: 'wardrobe', image_url,
+      user_id: session.user.id,
     }]).select()
     setUploading(false)
     if (!error) {
@@ -97,6 +107,12 @@ export default function App() {
     if (!error) { setItems(p => p.map(i => i.id===id ? {...i, status:"wardrobe", listed_price:null} : i)); setSelected(null); showToast("Unlisted") }
   }
 
+  async function signOut() {
+    await supabase.auth.signOut()
+    setSession(null)
+    setItems([])
+  }
+
   const wardrobeItems = items.filter(i => catFilter==="All" || i.category===catFilter)
   const listedItems = items.filter(i => i.status==="listed")
 
@@ -104,6 +120,7 @@ export default function App() {
     <div className="app">
       <div className="topbar">
         <div className="logo">un<span>archive</span></div>
+        <button onClick={signOut} style={{background:'none',border:'none',color:'#333',fontSize:9,fontFamily:"'Cinzel',serif",letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Sign out</button>
       </div>
 
       {tab==="wardrobe" && !selected && (
@@ -126,17 +143,13 @@ export default function App() {
                 {wardrobeItems.map(item=>(
                   <div key={item.id} className="item-card" onClick={()=>setSelected(item)}>
                     <div className="item-img">
-                      {item.image_url
-                        ? <img src={item.image_url} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}} />
-                        : item.emoji}
+                      {item.image_url ? <img src={item.image_url} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : item.emoji}
                     </div>
                     <div className="item-body">
                       <div className="item-name">{item.name}</div>
                       <div className="item-brand">{item.brand}</div>
                       <div className="item-foot">
-                        {item.status==="listed"
-                          ? <span className="badge badge-green">Listed</span>
-                          : <span className="badge badge-purple">{item.wears}×</span>}
+                        {item.status==="listed" ? <span className="badge badge-green">Listed</span> : <span className="badge badge-purple">{item.wears}×</span>}
                         <span className="item-price">€{item.bought_price}</span>
                       </div>
                     </div>
@@ -149,11 +162,7 @@ export default function App() {
       {tab==="wardrobe" && selected && (
         <div className="screen">
           <button className="back-btn" onClick={()=>setSelected(null)}>← Back</button>
-          <div className="detail-img">
-            {selected.image_url
-              ? <img src={selected.image_url} alt={selected.name} style={{width:"100%",height:"100%",objectFit:"cover"}} />
-              : selected.emoji}
-          </div>
+          <div className="detail-img">{selected.image_url ? <img src={selected.image_url} alt={selected.name} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : selected.emoji}</div>
           <div className="detail-name">{selected.name}</div>
           <div className="detail-meta">{selected.brand} — {selected.category} — {selected.condition}</div>
           <div className="cpw-row">
@@ -181,9 +190,7 @@ export default function App() {
             ? <div className="empty">No active listings.<br/>Go to your wardrobe to sell a piece.</div>
             : listedItems.map(item=>(
               <div key={item.id} className="list-row" onClick={()=>{setTab("wardrobe");setSelected(item)}}>
-                <div className="list-thumb">
-                  {item.image_url ? <img src={item.image_url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : item.emoji}
-                </div>
+                <div className="list-thumb">{item.image_url ? <img src={item.image_url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : item.emoji}</div>
                 <div className="list-info">
                   <div className="list-name">{item.name}</div>
                   <div className="list-meta">{item.brand} — {item.condition}</div>
@@ -220,9 +227,7 @@ export default function App() {
             <div className="field">
               <label>Photo</label>
               <div onClick={()=>fileInputRef.current.click()} style={{width:"100%",height:140,background:"#0c0c0c",border:"0.5px solid #1a1a1a",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden",marginBottom:4}}>
-                {photoPreview
-                  ? <img src={photoPreview} alt="preview" style={{width:"100%",height:"100%",objectFit:"cover"}} />
-                  : <span style={{color:"#282828",fontSize:11,fontFamily:"Cinzel, serif",letterSpacing:3,textTransform:"uppercase"}}>Tap to photograph</span>}
+                {photoPreview ? <img src={photoPreview} alt="preview" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : <span style={{color:"#282828",fontSize:11,fontFamily:"Cinzel,serif",letterSpacing:3,textTransform:"uppercase"}}>Tap to photograph</span>}
               </div>
               <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handlePhotoSelect} style={{display:"none"}} />
             </div>
@@ -243,7 +248,7 @@ export default function App() {
                 </select>
               </div>
             </div>
-            <button className="btn-primary" onClick={addItem} disabled={uploading}>{uploading ? "Saving..." : "Add to Wardrobe"}</button>
+            <button className="btn-primary" onClick={addItem} disabled={uploading}>{uploading?"Saving...":"Add to Wardrobe"}</button>
           </div>
         </div>
       )}
