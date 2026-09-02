@@ -8,6 +8,15 @@ const EMOJIS = { Tops:"🧥", Bottoms:"👖", Dresses:"👗", Shoes:"👟", Acce
 const SUGGEST = (item) => Math.round((item.bought_price||0) * (item.condition==="Like new"?0.65:item.condition==="Excellent"?0.5:0.35))
 const BUCKET = "clothing-clicks"
 
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result.split(',')[1])
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [tab, setTab] = useState("wardrobe")
@@ -30,6 +39,9 @@ export default function App() {
   const [uploading, setUploading] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [profileStats, setProfileStats] = useState({ total:0, value:0, earned:0, wears:0 })
+  const [tagging, setTagging] = useState(false)
+  const [tagError, setTagError] = useState("")
+  const [estimatedResale, setEstimatedResale] = useState(null)
   const timer = useRef(null)
   const fileInputRef = useRef(null)
 
@@ -69,11 +81,34 @@ export default function App() {
     timer.current = setTimeout(() => setToastOn(false), 2200)
   }
 
-  function handlePhotoSelect(e) {
+  async function handlePhotoSelect(e) {
     const file = e.target.files[0]
     if (!file) return
     setPhotoFile(file)
     setPhotoPreview(URL.createObjectURL(file))
+    setTagError(""); setEstimatedResale(null); setTagging(true)
+    try {
+      const base64 = await fileToBase64(file)
+      const res = await fetch('/api/tag-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64, mimeType: file.type }),
+      })
+      if (!res.ok) throw new Error('Tagging failed')
+      const tags = await res.json()
+      setForm(p => ({
+        ...p,
+        name: tags.name || p.name,
+        brand: tags.brand || p.brand,
+        category: tags.category || p.category,
+        condition: tags.condition || p.condition,
+      }))
+      if (tags.estimated_resale_value) setEstimatedResale(tags.estimated_resale_value)
+    } catch (err) {
+      setTagError("Auto-tag failed — fill in manually")
+    } finally {
+      setTagging(false)
+    }
   }
 
   async function addItem() {
@@ -94,13 +129,14 @@ export default function App() {
       condition: form.condition, bought_price: parseFloat(form.bought_price)||0,
       wears: 0, status: 'wardrobe', image_url, user_id: session.user.id,
       size: form.size,
+      estimated_resale_value: estimatedResale,
     }]).select()
     setUploading(false)
     if (!error) {
       setItems(p => [{ ...data[0], emoji: EMOJIS[data[0].category] }, ...p])
       setAddOpen(false)
       setForm({ name:"", brand:"", category:"Tops", condition:"Good", bought_price:"", size:"" })
-      setPhotoFile(null); setPhotoPreview(null)
+      setPhotoFile(null); setPhotoPreview(null); setEstimatedResale(null); setTagError("")
       showToast("Added to wardrobe ✓")
     }
   }
@@ -340,10 +376,19 @@ export default function App() {
             <div className="modal-title">Add Piece</div>
             <div className="field">
               <label>Photo</label>
-              <div onClick={()=>fileInputRef.current.click()} style={{width:"100%",height:140,background:"#0c0c0c",border:"0.5px solid #1a1a1a",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden",marginBottom:4}}>
+              <div onClick={()=>fileInputRef.current.click()} style={{width:"100%",height:140,background:"#0c0c0c",border:"0.5px solid #1a1a1a",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden",marginBottom:4,position:"relative"}}>
                 {photoPreview ? <img src={photoPreview} alt="preview" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : <span style={{color:"#282828",fontSize:11,fontFamily:"Cinzel,serif",letterSpacing:3,textTransform:"uppercase"}}>Tap to photograph</span>}
+                {tagging && (
+                  <div style={{position:"absolute",inset:0,background:"rgba(8,8,8,0.75)",display:"flex",alignItems:"center",justifyContent:"center",color:"#d8d4cc",fontSize:10,fontFamily:"Cinzel,serif",letterSpacing:3,textTransform:"uppercase"}}>
+                    Reading garment...
+                  </div>
+                )}
               </div>
               <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handlePhotoSelect} style={{display:"none"}} />
+              {tagError && <div style={{color:"#c0392b",fontSize:11,fontStyle:"italic",marginTop:6}}>{tagError}</div>}
+              {estimatedResale !== null && !tagging && (
+                <div style={{color:"#4a6a3a",fontSize:11,fontStyle:"italic",marginTop:6}}>Est. resale value: €{estimatedResale}</div>
+              )}
             </div>
             <div className="field"><label>Name</label><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Oversized wool coat" /></div>
             <div className="row2">
@@ -363,7 +408,7 @@ export default function App() {
                 {["Like new","Excellent","Good","Fair"].map(c=><option key={c}>{c}</option>)}
               </select>
             </div>
-            <button className="btn-primary" onClick={addItem} disabled={uploading}>{uploading?"Saving...":"Add to Wardrobe"}</button>
+            <button className="btn-primary" onClick={addItem} disabled={uploading || tagging}>{uploading?"Saving...":tagging?"Reading garment...":"Add to Wardrobe"}</button>
           </div>
         </div>
       )}
