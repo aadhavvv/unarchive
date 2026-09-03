@@ -9,6 +9,7 @@ export default async function handler(req, res) {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY
+  const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID
   if (!apiKey) {
     return res.status(500).json({ error: 'Server is missing ANTHROPIC_API_KEY' })
   }
@@ -42,6 +43,7 @@ Respond with ONLY a JSON object, no other text, no markdown fences, in this exac
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
+        ...(workspaceId ? { 'anthropic-workspace-id': workspaceId } : {}),
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',

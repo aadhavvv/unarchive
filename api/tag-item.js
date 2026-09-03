@@ -11,6 +11,7 @@ export default async function handler(req, res) {
   if (!image) {
     return res.status(400).json({ error: 'Missing image' })
   }
+  const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID
 
   const CATS = ["Tops", "Bottoms", "Dresses", "Shoes", "Accessories"]
   const CONDITIONS = ["Like new", "Excellent", "Good", "Fair"]
@@ -31,6 +32,7 @@ Respond with ONLY the JSON object.`
         'Content-Type': 'application/json',
         'x-api-key': process.env.ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
+        ...(workspaceId ? { 'anthropic-workspace-id': workspaceId } : {}),
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
