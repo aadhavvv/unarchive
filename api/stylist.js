@@ -15,8 +15,8 @@ export default async function handler(req, res) {
   }
 
   const { items } = req.body || {}
-  if (!Array.isArray(items) || items.length < 2) {
-    return res.status(400).json({ error: 'Need at least 2 wardrobe items to build an outfit' })
+  if (!Array.isArray(items) || items.length < 1) {
+    return res.status(400).json({ error: 'Add at least 1 wardrobe item first' })
   }
 
   // Only send the fields the model actually needs — keeps payload tiny.
@@ -31,10 +31,13 @@ export default async function handler(req, res) {
   const prompt = `Here is a list of clothing items from someone's real wardrobe, as JSON:
 ${JSON.stringify(trimmed)}
 
-Suggest 3 complete outfits using ONLY items from this exact list — never invent items that aren't listed. Each outfit should use 2-4 items and make sense together (an outfit needs at minimum a top+bottom, or a dress, plus optionally shoes/accessories — don't suggest two tops with no bottom, for example).
+Suggest up to 3 outfit or styling ideas using ONLY items from this exact list — never invent items that aren't listed.
+
+If there are enough complementary items (e.g. a top and a bottom, or a dress), build full outfits of 2-4 items each.
+If the wardrobe is small or items don't naturally combine (e.g. only 2 tops, nothing else), it's fine to suggest a single item with a styling tip instead of forcing a full outfit — just make sure every outfit references at least 1 real item from the list.
 
 Respond with ONLY a JSON object, no other text, no markdown fences, in this exact shape:
-{"outfits": [{"title": "short outfit name", "item_ids": ["id1", "id2"], "why": "one short sentence on why these work together"}]}`
+{"outfits": [{"title": "short outfit name", "item_ids": ["id1", "id2"], "why": "one short sentence on why these work together or how to style this piece"}]}`
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -85,7 +88,7 @@ Respond with ONLY a JSON object, no other text, no markdown fences, in this exac
         why: String(o.why || '').slice(0, 150),
         item_ids: Array.isArray(o.item_ids) ? o.item_ids.filter(id => validIds.has(String(id))) : [],
       }))
-      .filter(o => o.item_ids.length >= 2)
+      .filter(o => o.item_ids.length >= 1)
 
     return res.status(200).json({ outfits })
   } catch (err) {
