@@ -235,6 +235,7 @@ export default function App() {
       {/* WARDROBE */}
       {tab==="wardrobe" && !selected && (
         <div className="screen">
+          <div className="hero-line">Your wardrobe, catalogued.<br/>The way it should have always worked.</div>
           <div className="stats-row">
             <div className="stat"><div className="stat-val">{items.length}</div><div className="stat-lbl">Items</div></div>
             <div className="stat"><div className="stat-val">€{items.reduce((s,i)=>s+(i.bought_price||0),0)}</div><div className="stat-lbl">Value</div></div>
@@ -317,6 +318,7 @@ export default function App() {
       {/* MARKET */}
       {tab==="market" && !marketSelected && (
         <div className="screen">
+          <div className="hero-line">In someone else's closet next.<br/>Secondhand, reimagined.</div>
           <div className="field" style={{marginBottom:14}}>
             <input
               value={mktSearch}
