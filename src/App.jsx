@@ -246,13 +246,23 @@ export default function App() {
           <div className="chips">
             {CATS.map(c=><button key={c} className={"chip"+(catFilter===c?" chip-on":"")} onClick={()=>setCatFilter(c)}>{c}</button>)}
           </div>
-          {loading ? <div className="empty">Loading...</div>
+          {loading ? (
+              <div className="skeleton-grid">
+                {[0,1,2,3].map(i=>(
+                  <div key={i} className="skeleton-card">
+                    <div className="skeleton-img"></div>
+                    <div className="skeleton-line"></div>
+                    <div className="skeleton-line short"></div>
+                  </div>
+                ))}
+              </div>
+            )
             : wardrobeItems.length===0 ? <div className="empty">Your wardrobe is empty.<br/>Add your first piece.</div>
             : <div className="grid">
                 {wardrobeItems.map((item,idx)=>(
                   <div key={item.id} className="item-card fade-up" style={{animationDelay:`${idx*0.03}s`}} onClick={()=>setSelected(item)}>
                     <div className="item-img">
-                      {item.image_url ? <img src={item.image_url} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : item.emoji}
+                      {item.image_url ? <img src={item.image_url} alt={item.name} className="img-fade" onLoad={e=>e.target.classList.add('loaded')} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : item.emoji}
                     </div>
                     <div className="item-body">
                       <div className="item-name">{item.name}</div>
@@ -273,7 +283,7 @@ export default function App() {
         <div className="screen">
           <button className="back-btn" onClick={()=>setSelected(null)}>← Back</button>
           <div className="detail-img">
-            {selected.image_url ? <img src={selected.image_url} alt={selected.name} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : selected.emoji}
+            {selected.image_url ? <img src={selected.image_url} alt={selected.name} className="img-fade" onLoad={e=>e.target.classList.add('loaded')} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : selected.emoji}
           </div>
           <div className="detail-name">{selected.name}</div>
           <div className="detail-meta">{selected.brand} — {selected.category} — {selected.condition}{selected.size ? ` — ${selected.size}` : ''}</div>
@@ -352,7 +362,7 @@ export default function App() {
         <div className="screen">
           <button className="back-btn" onClick={()=>setMarketSelected(null)}>← Back</button>
           <div className="detail-img">
-            {marketSelected.image_url ? <img src={marketSelected.image_url} alt={marketSelected.name} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : marketSelected.emoji}
+            {marketSelected.image_url ? <img src={marketSelected.image_url} alt={marketSelected.name} className="img-fade" onLoad={e=>e.target.classList.add('loaded')} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : marketSelected.emoji}
           </div>
           <div className="detail-name">{marketSelected.name}</div>
           <div className="detail-meta">{marketSelected.brand} — {marketSelected.category} — {marketSelected.condition}{marketSelected.size ? ` — Size ${marketSelected.size}` : ''}</div>
