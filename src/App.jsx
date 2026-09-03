@@ -8,11 +8,37 @@ const EMOJIS = { Tops:"🧥", Bottoms:"👖", Dresses:"👗", Shoes:"👟", Acce
 const SUGGEST = (item) => Math.round((item.bought_price||0) * (item.condition==="Like new"?0.65:item.condition==="Excellent"?0.5:0.35))
 const BUCKET = "clothing-clicks"
 
-function fileToBase64(file) {
+// Resize + compress an image client-side before sending it anywhere.
+// Phone photos are often 3-8MB; base64-encoded that can exceed serverless
+// request size limits and get silently rejected before your function ever runs.
+// This keeps the payload small and reliable.
+function compressImage(file, maxDim = 1024, quality = 0.82) {
   return new Promise((resolve, reject) => {
+    const img = new Image()
     const reader = new FileReader()
-    reader.onload = () => resolve(reader.result.split(',')[1])
+    reader.onload = () => { img.src = reader.result }
     reader.onerror = reject
+    img.onload = () => {
+      let { width, height } = img
+      if (width > height && width > maxDim) { height = Math.round(height * (maxDim / width)); width = maxDim }
+      else if (height > maxDim) { width = Math.round(width * (maxDim / height)); height = maxDim }
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0, width, height)
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error('Compression failed'))
+          const outReader = new FileReader()
+          outReader.onload = () => resolve({ base64: outReader.result.split(',')[1], blob, mimeType: 'image/jpeg' })
+          outReader.onerror = reject
+          outReader.readAsDataURL(blob)
+        },
+        'image/jpeg',
+        quality
+      )
+    }
+    img.onerror = reject
     reader.readAsDataURL(file)
   })
 }
@@ -34,7 +60,7 @@ export default function App() {
   const [toast, setToast] = useState("")
   const [toastOn, setToastOn] = useState(false)
   const [form, setForm] = useState({ name:"", brand:"", category:"Tops", condition:"Good", bought_price:"", size:"" })
-  const [photoFile, setPhotoFile] = useState(null)
+  const [photoBlob, setPhotoBlob] = useState(null)
   const [photoPreview, setPhotoPreview] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
@@ -84,17 +110,22 @@ export default function App() {
   async function handlePhotoSelect(e) {
     const file = e.target.files[0]
     if (!file) return
-    setPhotoFile(file)
-    setPhotoPreview(URL.createObjectURL(file))
     setTagError(""); setEstimatedResale(null); setTagging(true)
     try {
-      const base64 = await fileToBase64(file)
+      const { base64, blob, mimeType } = await compressImage(file)
+      setPhotoBlob(blob)
+      setPhotoPreview(URL.createObjectURL(blob))
+
       const res = await fetch('/api/tag-item', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64, mimeType: file.type }),
+        body: JSON.stringify({ image: base64, mimeType }),
       })
-      if (!res.ok) throw new Error('Tagging failed')
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '')
+        console.error('tag-item request failed', res.status, errBody)
+        throw new Error(`Tagging failed (${res.status})`)
+      }
       const tags = await res.json()
       setForm(p => ({
         ...p,
@@ -105,6 +136,7 @@ export default function App() {
       }))
       if (tags.estimated_resale_value) setEstimatedResale(tags.estimated_resale_value)
     } catch (err) {
+      console.error('Auto-tag error:', err)
       setTagError("Auto-tag failed — fill in manually")
     } finally {
       setTagging(false)
@@ -115,13 +147,14 @@ export default function App() {
     if (!form.name || !form.brand) return
     setUploading(true)
     let image_url = null
-    if (photoFile) {
-      const ext = photoFile.name.split('.').pop()
-      const fileName = `${session.user.id}_${Date.now()}.${ext}`
-      const { error: uploadError } = await supabase.storage.from(BUCKET).upload(fileName, photoFile)
+    if (photoBlob) {
+      const fileName = `${session.user.id}_${Date.now()}.jpg`
+      const { error: uploadError } = await supabase.storage.from(BUCKET).upload(fileName, photoBlob, { contentType: 'image/jpeg' })
       if (!uploadError) {
         const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(fileName)
         image_url = urlData.publicUrl
+      } else {
+        console.error('Image upload failed', uploadError)
       }
     }
     const { data, error } = await supabase.from('items').insert([{
@@ -136,8 +169,11 @@ export default function App() {
       setItems(p => [{ ...data[0], emoji: EMOJIS[data[0].category] }, ...p])
       setAddOpen(false)
       setForm({ name:"", brand:"", category:"Tops", condition:"Good", bought_price:"", size:"" })
-      setPhotoFile(null); setPhotoPreview(null); setEstimatedResale(null); setTagError("")
+      setPhotoBlob(null); setPhotoPreview(null); setEstimatedResale(null); setTagError("")
       showToast("Added to wardrobe ✓")
+    } else {
+      console.error('Insert failed', error)
+      showToast("Something went wrong")
     }
   }
 
@@ -193,7 +229,7 @@ export default function App() {
     <div className="app">
       <div className="topbar">
         <div className="logo">un<span>archive</span></div>
-        <button onClick={signOut} style={{background:'none',border:'none',color:'#333',fontSize:9,fontFamily:"'Cinzel',serif",letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Sign out</button>
+        <button onClick={signOut} className="signout-btn">Sign out</button>
       </div>
 
       {/* WARDROBE */}
@@ -212,8 +248,8 @@ export default function App() {
           {loading ? <div className="empty">Loading...</div>
             : wardrobeItems.length===0 ? <div className="empty">Your wardrobe is empty.<br/>Add your first piece.</div>
             : <div className="grid">
-                {wardrobeItems.map(item=>(
-                  <div key={item.id} className="item-card" onClick={()=>setSelected(item)}>
+                {wardrobeItems.map((item,idx)=>(
+                  <div key={item.id} className="item-card fade-up" style={{animationDelay:`${idx*0.03}s`}} onClick={()=>setSelected(item)}>
                     <div className="item-img">
                       {item.image_url ? <img src={item.image_url} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : item.emoji}
                     </div>
@@ -281,12 +317,13 @@ export default function App() {
       {/* MARKET */}
       {tab==="market" && !marketSelected && (
         <div className="screen">
-          <input
-            value={mktSearch}
-            onChange={e=>setMktSearch(e.target.value)}
-            placeholder="Search brand or item..."
-            style={{width:'100%',padding:'12px',border:'0.5px solid #1a1a1a',fontSize:14,background:'#0c0c0c',color:'#d8d4cc',fontFamily:"'Cormorant Garamond',serif",outline:'none',boxSizing:'border-box',marginBottom:14}}
-          />
+          <div className="field" style={{marginBottom:14}}>
+            <input
+              value={mktSearch}
+              onChange={e=>setMktSearch(e.target.value)}
+              placeholder="Search brand or item..."
+            />
+          </div>
           <div className="chips">
             {CATS.map(c=><button key={c} className={"chip"+(mktFilter===c?" chip-on":"")} onClick={()=>setMktFilter(c)}>{c}</button>)}
           </div>
@@ -295,7 +332,7 @@ export default function App() {
             ? <div className="empty">No listings yet.<br/>Be the first to sell something.</div>
             : filteredMarket.map(item=>(
               <div key={item.id} className="list-row" onClick={()=>setMarketSelected(item)}>
-                <div className="list-thumb" style={{background:'#0c0c0c'}}>
+                <div className="list-thumb">
                   {item.image_url ? <img src={item.image_url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : item.emoji}
                 </div>
                 <div className="list-info">
@@ -330,23 +367,23 @@ export default function App() {
       {/* PROFILE */}
       {tab==="profile" && (
         <div className="screen">
-          <div style={{textAlign:'center',marginBottom:24}}>
-            <div style={{width:64,height:64,borderRadius:'50%',background:'#1a1a1a',border:'0.5px solid #333',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 12px',fontSize:24}}>👤</div>
-            <div style={{fontFamily:"'Cinzel',serif",fontSize:12,color:'#888',letterSpacing:2}}>{session.user.email}</div>
+          <div style={{textAlign:'center',marginBottom:26}}>
+            <div style={{width:64,height:64,borderRadius:'50%',background:'var(--bg-raised)',border:'0.5px solid var(--line)',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 14px',fontSize:24}}>👤</div>
+            <div style={{fontFamily:"'Cinzel',serif",fontSize:12,color:'var(--fg-dim)',letterSpacing:2}}>{session.user.email}</div>
           </div>
           <div className="stats-row">
             <div className="stat"><div className="stat-val">{profileStats.total}</div><div className="stat-lbl">Items</div></div>
             <div className="stat"><div className="stat-val">€{profileStats.value}</div><div className="stat-lbl">Wardrobe value</div></div>
             <div className="stat"><div className="stat-val">{profileStats.wears}</div><div className="stat-lbl">Total wears</div></div>
           </div>
-          <div className="section-lbl" style={{marginTop:20}}>Account</div>
+          <div className="section-lbl" style={{marginTop:22}}>Account</div>
           <div className="list-row">
             <div className="list-info"><div className="list-name">Email</div><div className="list-meta">{session.user.email}</div></div>
           </div>
           <div className="list-row">
             <div className="list-info"><div className="list-name">Member since</div><div className="list-meta">{new Date(session.user.created_at).toLocaleDateString('en-GB', {month:'long',year:'numeric'})}</div></div>
           </div>
-          <div style={{marginTop:24}}>
+          <div style={{marginTop:26}}>
             <button className="btn-delete" onClick={signOut}>Sign Out</button>
           </div>
         </div>
@@ -376,18 +413,19 @@ export default function App() {
             <div className="modal-title">Add Piece</div>
             <div className="field">
               <label>Photo</label>
-              <div onClick={()=>fileInputRef.current.click()} style={{width:"100%",height:140,background:"#0c0c0c",border:"0.5px solid #1a1a1a",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",overflow:"hidden",marginBottom:4,position:"relative"}}>
-                {photoPreview ? <img src={photoPreview} alt="preview" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : <span style={{color:"#282828",fontSize:11,fontFamily:"Cinzel,serif",letterSpacing:3,textTransform:"uppercase"}}>Tap to photograph</span>}
+              <div className="photo-drop" onClick={()=>fileInputRef.current.click()}>
+                {photoPreview ? <img src={photoPreview} alt="preview" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : <span className="photo-hint">Tap to photograph</span>}
                 {tagging && (
-                  <div style={{position:"absolute",inset:0,background:"rgba(8,8,8,0.75)",display:"flex",alignItems:"center",justifyContent:"center",color:"#d8d4cc",fontSize:10,fontFamily:"Cinzel,serif",letterSpacing:3,textTransform:"uppercase"}}>
-                    Reading garment...
+                  <div className="photo-overlay">
+                    <span>Reading garment</span>
+                    <span className="dots"><span>.</span><span>.</span><span>.</span></span>
                   </div>
                 )}
               </div>
               <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handlePhotoSelect} style={{display:"none"}} />
-              {tagError && <div style={{color:"#c0392b",fontSize:11,fontStyle:"italic",marginTop:6}}>{tagError}</div>}
+              {tagError && <div className="tag-error">{tagError}</div>}
               {estimatedResale !== null && !tagging && (
-                <div style={{color:"#4a6a3a",fontSize:11,fontStyle:"italic",marginTop:6}}>Est. resale value: €{estimatedResale}</div>
+                <div className="tag-success">Est. resale value: €{estimatedResale}</div>
               )}
             </div>
             <div className="field"><label>Name</label><input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Oversized wool coat" /></div>
@@ -422,8 +460,8 @@ export default function App() {
             <div className="list-preview">
               <div className="list-thumb">{selected.image_url ? <img src={selected.image_url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} /> : selected.emoji}</div>
               <div>
-                <div style={{fontWeight:300,color:"#c8c4bc",fontSize:14}}>{selected.name}</div>
-                <div style={{fontSize:11,color:"#333",fontStyle:"italic",marginTop:3}}>{selected.brand} — {selected.condition}</div>
+                <div style={{fontWeight:300,color:"var(--fg)",fontSize:14}}>{selected.name}</div>
+                <div style={{fontSize:11,color:"var(--fg-faint)",fontStyle:"italic",marginTop:3}}>{selected.brand} — {selected.condition}</div>
               </div>
             </div>
             <div className="field">
@@ -441,7 +479,7 @@ export default function App() {
           <div className="modal">
             <div className="modal-handle"></div>
             <div className="modal-title">Delete Item?</div>
-            <div style={{textAlign:'center',color:'#666',fontSize:14,fontStyle:'italic',marginBottom:24}}>This cannot be undone.</div>
+            <div style={{textAlign:'center',color:'var(--fg-dim)',fontSize:14,fontStyle:'italic',marginBottom:26}}>This cannot be undone.</div>
             <button className="btn-delete" onClick={()=>deleteItem(deleteConfirm)} style={{marginBottom:10}}>Yes, Delete</button>
             <button className="btn-secondary" onClick={()=>setDeleteConfirm(null)}>Cancel</button>
           </div>
