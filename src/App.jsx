@@ -68,6 +68,9 @@ export default function App() {
   const [tagging, setTagging] = useState(false)
   const [tagError, setTagError] = useState("")
   const [estimatedResale, setEstimatedResale] = useState(null)
+  const [stylistOutfits, setStylistOutfits] = useState([])
+  const [stylistLoading, setStylistLoading] = useState(false)
+  const [stylistError, setStylistError] = useState("")
   const timer = useRef(null)
   const fileInputRef = useRef(null)
 
@@ -217,6 +220,38 @@ export default function App() {
     setSession(null); setItems([])
   }
 
+  async function generateOutfits() {
+    const wardrobeOnly = items.filter(i => i.status !== 'listed')
+    if (wardrobeOnly.length < 2) {
+      setStylistError("Add at least 2 items to your wardrobe first")
+      return
+    }
+    setStylistLoading(true); setStylistError(""); setStylistOutfits([])
+    try {
+      const res = await fetch('/api/stylist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: wardrobeOnly.map(i => ({ id: i.id, name: i.name, brand: i.brand, category: i.category, condition: i.condition })) }),
+      })
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '')
+        console.error('stylist request failed', res.status, errBody)
+        throw new Error(`Stylist failed (${res.status})`)
+      }
+      const data = await res.json()
+      if (!data.outfits || data.outfits.length === 0) {
+        setStylistError("Couldn't put together outfits from what's in your wardrobe yet")
+      } else {
+        setStylistOutfits(data.outfits)
+      }
+    } catch (err) {
+      console.error('Stylist error:', err)
+      setStylistError("Something went wrong — try again")
+    } finally {
+      setStylistLoading(false)
+    }
+  }
+
   const wardrobeItems = items.filter(i => catFilter==="All" || i.category===catFilter)
   const listedItems = items.filter(i => i.status==="listed")
   const filteredMarket = marketItems.filter(i => {
@@ -325,6 +360,56 @@ export default function App() {
         </div>
       )}
 
+      {/* STYLIST */}
+      {tab==="stylist" && (
+        <div className="screen">
+          <div className="hero-line">Outfits, from what you already own.<br/>No new purchases required.</div>
+          <button className="add-btn" onClick={generateOutfits} disabled={stylistLoading}>
+            {stylistLoading ? "Thinking..." : "Generate Outfit Ideas"}
+          </button>
+          {stylistError && <div className="tag-error" style={{marginBottom:20}}>{stylistError}</div>}
+          {stylistLoading && (
+            <div className="skeleton-grid" style={{gridTemplateColumns:"1fr"}}>
+              {[0,1].map(i=>(
+                <div key={i} className="skeleton-card" style={{marginBottom:1}}>
+                  <div className="skeleton-line" style={{height:14}}></div>
+                  <div className="skeleton-line short"></div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!stylistLoading && stylistOutfits.length > 0 && (
+            <div>
+              <div className="section-lbl">{stylistOutfits.length} Outfit{stylistOutfits.length>1?'s':''}</div>
+              {stylistOutfits.map((outfit, idx) => {
+                const outfitItems = outfit.item_ids.map(id => items.find(i => String(i.id)===String(id))).filter(Boolean)
+                return (
+                  <div key={idx} className="fade-up" style={{animationDelay:`${idx*0.06}s`, marginBottom:28}}>
+                    <div style={{fontFamily:"'Cormorant Garamond',serif", fontStyle:"italic", fontSize:19, color:"var(--fg)", marginBottom:4}}>{outfit.title}</div>
+                    <div style={{fontSize:12, color:"var(--fg-dim)", fontStyle:"italic", marginBottom:12}}>{outfit.why}</div>
+                    <div style={{display:"flex", gap:1, background:"var(--line)"}}>
+                      {outfitItems.map(item => (
+                        <div key={item.id} className="item-card" style={{flex:1}} onClick={()=>{setTab("wardrobe"); setSelected(item)}}>
+                          <div className="item-img" style={{aspectRatio:"1/1"}}>
+                            {item.image_url ? <img src={item.image_url} alt={item.name} className="img-fade" onLoad={e=>e.target.classList.add('loaded')} style={{width:"100%",height:"100%",objectFit:"cover"}} /> : item.emoji}
+                          </div>
+                          <div className="item-body" style={{padding:"9px 8px"}}>
+                            <div className="item-name" style={{fontSize:11}}>{item.name}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {!stylistLoading && stylistOutfits.length === 0 && !stylistError && (
+            <div className="empty">Tap the button above.<br/>Outfits are built from your real wardrobe.</div>
+          )}
+        </div>
+      )}
+
       {/* MARKET */}
       {tab==="market" && !marketSelected && (
         <div className="screen">
@@ -408,6 +493,9 @@ export default function App() {
         </button>
         <button className={"bnav"+(tab==="sell"?" bnav-on":"")} onClick={()=>setTab("sell")}>
           <span className="bnav-icon">◇</span><span>Sell</span>
+        </button>
+        <button className={"bnav"+(tab==="stylist"?" bnav-on":"")} onClick={()=>setTab("stylist")}>
+          <span className="bnav-icon">✦</span><span>Stylist</span>
         </button>
         <button className={"bnav"+(tab==="market"?" bnav-on":"")} onClick={()=>{setTab("market");setMarketSelected(null)}}>
           <span className="bnav-icon">○</span><span>Market</span>
